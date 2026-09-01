@@ -1,0 +1,34 @@
+[project]
+name = "hhbot"
+version = "0.1.0"
+description = "Бот для hh.ru: поиск вакансий, отклики с сопроводительными письмами, переписка с работодателем и запись на собеседования"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=1.0.0",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "respx>=0.21"]
+
+[project.scripts]
+hhbot = "hhbot.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hhbot = ["prompts/*.md", "config.example.yaml", "env.example"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

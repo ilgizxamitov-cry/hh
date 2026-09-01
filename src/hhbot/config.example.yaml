@@ -1,0 +1,178 @@
+# ============================================================================
+#  Конфигурация hhbot. Секреты (ключи API) сюда НЕ пишем — они живут в .env
+#  Скопируйте командой `hhbot init`, затем заполните под себя.
+# ============================================================================
+
+# По умолчанию бот ничего никуда не отправляет: только показывает, что сделал бы.
+# Реальная отправка — либо dry_run: false, либо флаг `hhbot --live ...`
+dry_run: true
+
+db_path: state/hhbot.db
+
+auth:
+  token_file: state/tokens.json
+  # client_id / client_secret / redirect_uri / user_agent берутся из .env
+
+# ---------------------------------------------------------------------------
+# Профиль: ЕДИНСТВЕННЫЙ источник фактов о вас для модели.
+# Чего здесь нет — того не будет в письмах. Чем конкретнее, тем лучше письма.
+# ---------------------------------------------------------------------------
+profile:
+  full_name: Иван Иванов
+  headline: Python-разработчик (backend)
+  years_experience: 5
+  summary: >
+    Backend-разработчик. Проектирую и поддерживаю сервисы на Python:
+    высоконагруженные API, интеграции, обработка данных.
+  key_skills:
+    - Python
+    - FastAPI
+    - PostgreSQL
+    - Docker
+    - Kubernetes
+    - asyncio
+  achievements:
+    - Сократил время ответа ключевого API с 800 мс до 120 мс (профилирование + кэш + индексы)
+    - Перевёл монолит на 12 сервисов без простоя, деплой с 1 раза в месяц до 5 раз в неделю
+    - Настроил CI/CD и тесты, доля падений на проде снизилась примерно втрое
+  education: МГТУ им. Баумана, прикладная математика
+  languages:
+    - русский — родной
+    - английский — B2, техническая документация и созвоны
+  city: Москва
+  ready_to_relocate: false
+  remote_only: false
+  salary_expectation: 350000
+  salary_currency: RUR
+  notice_period: готов выйти через 2 недели
+  contacts:
+    email: you@example.com
+    telegram: "@yourname"
+  # ID резюме, которое отправляем в откликах. Посмотреть: hhbot resumes
+  resume_id: null
+
+# ---------------------------------------------------------------------------
+# Поисковые запросы. Параметры повторяют API hh.ru /vacancies
+# Справочники: https://api.hh.ru/dictionaries, регионы: https://api.hh.ru/areas
+# ---------------------------------------------------------------------------
+searches:
+  - name: python-remote
+    text: (Python OR Django OR FastAPI) NOT (1С OR PHP)
+    area: [113]           # 113 = Россия; 1 = Москва; 2 = Санкт-Петербург
+    schedule: [remote]
+    experience: between3And6
+    period: 7             # вакансии за последние N дней
+    order_by: publication_time
+    per_page: 50
+    max_pages: 3
+    label: [not_from_agency]
+
+  - name: python-msk
+    text: Python backend
+    area: [1]
+    experience: between3And6
+    period: 3
+    per_page: 50
+    max_pages: 2
+
+# ---------------------------------------------------------------------------
+# Жёсткие фильтры — работают до обращения к модели (экономия токенов)
+# ---------------------------------------------------------------------------
+filters:
+  exclude_keywords:
+    - 1С
+    - стажёр
+    - оператор call
+    - продаж
+  exclude_employers:
+    - Название компании, куда точно не хочу
+  require_keywords_any:
+    - Python
+  min_salary: 250000
+  salary_currency: RUR
+  treat_missing_salary_as_ok: true   # вакансии без зарплаты не отсеиваем
+  skip_with_test: true               # вакансии с тестом hh.ru пропускаем (руками)
+  skip_agencies: false
+  max_age_days: 30
+  allowed_experience: [between1And3, between3And6, moreThan6]
+  min_fit_score: 70                  # порог оценки модели 0-100 для отклика
+
+# ---------------------------------------------------------------------------
+# Сопроводительное письмо
+# ---------------------------------------------------------------------------
+letter:
+  language: ru
+  min_chars: 500
+  max_chars: 1400
+  tone: деловой, спокойный, без канцелярита и превосходных степеней
+  include_salary_expectation: false
+  must_mention: []
+  forbid:
+    - фразы вроде «я идеальный кандидат» и «быстро обучаюсь»
+    - пересказ всего резюме
+    - обещания, которых нет в профиле
+  signature: ""
+  # Образцы вашего стиля (2-3 письма, которые вам нравятся) — модель подстроится
+  examples: []
+
+# ---------------------------------------------------------------------------
+# Переписка с работодателем
+# ---------------------------------------------------------------------------
+chat:
+  # false — бот только готовит черновики, вы отправляете через `hhbot drafts send`
+  autopilot: false
+  # true — бот сам подтверждает время, если оно попадает в окно доступности ниже
+  auto_confirm_interviews: false
+  reply_language: ru
+  max_reply_chars: 900
+  poll_interval_minutes: 30
+  escalate_keywords:
+    - оффер
+    - оклад
+    - зарплат
+    - договор
+    - паспорт
+    - снилс
+    - инн
+    - карта
+    - оплат
+    - предоплат
+    - тестовое задание
+
+# ---------------------------------------------------------------------------
+# Когда вам можно назначать собеседования
+# ---------------------------------------------------------------------------
+availability:
+  timezone: Europe/Moscow
+  weekly:            # 0 = понедельник ... 6 = воскресенье
+    0: [{start: "11:00", end: "18:00"}]
+    1: [{start: "11:00", end: "18:00"}]
+    2: [{start: "11:00", end: "13:00"}, {start: "15:00", end: "19:00"}]
+    3: [{start: "11:00", end: "18:00"}]
+    4: [{start: "11:00", end: "16:00"}]
+  blackout_dates:
+    - 2026-01-01
+  slot_minutes: 60
+  buffer_minutes: 30      # зазор между встречами
+  min_notice_hours: 24    # не соглашаться на встречу раньше чем через сутки
+  horizon_days: 14
+  max_per_day: 3
+  formats: [online, phone]
+  preferred_platforms: [Google Meet, Zoom, Telegram]
+
+# ---------------------------------------------------------------------------
+# Лимиты. hh.ru ограничивает число откликов в сутки — не жадничайте
+# ---------------------------------------------------------------------------
+limits:
+  max_applications_per_day: 40
+  max_applications_per_run: 15
+  min_delay_seconds: 8
+  max_delay_seconds: 25
+  max_chat_replies_per_day: 30
+
+llm:
+  model: claude-opus-5
+  effort: high            # low | medium | high | xhigh | max
+  max_tokens: 8000
+  thinking: true
+  server_side_fallbacks: true

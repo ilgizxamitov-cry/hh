@@ -1,0 +1,18 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# Секреты и локальное состояние — НИКОГДА не коммитим
+.env
+config.yaml
+state/
+*.db
+*.sqlite3
+tokens.json
+*.ics
