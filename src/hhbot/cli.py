@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from importlib import resources
 from pathlib import Path
 from typing import Annotated, Optional
@@ -15,6 +16,7 @@ from rich.table import Table
 from .api import HhClient
 from .auth import AuthError, HhAuth, TokenStore
 from .config import DEFAULT_CONFIG_PATH, BotConfig
+from .doctor import run_checks
 from .llm import LLM
 from .matching import hard_filter, prescore
 from .models import Vacancy
@@ -127,8 +129,14 @@ def auth_login(ctx: typer.Context, no_browser: bool = False) -> None:
 
 @auth_app.command("code")
 def auth_code(ctx: typer.Context, code: str) -> None:
-    """Обменять код авторизации на токен (если ловили редирект вручную)."""
+    """Обменять код на токен. Можно вставить как сам код, так и весь URL редиректа."""
     obj: Context = ctx.obj
+    if "code=" in code:
+        query = urllib.parse.urlparse(code).query or code.split("?", 1)[-1]
+        values = urllib.parse.parse_qs(query).get("code")
+        if not values:
+            raise typer.BadParameter("в ссылке нет параметра code")
+        code = values[0]
     obj.auth.exchange_code(code)
     console.print("[green]Токен сохранён[/green]")
 
@@ -398,6 +406,30 @@ def run(
         minutes = obj.config.chat.poll_interval_minutes
         console.print(f"[dim]следующий прогон через {minutes} мин[/dim]")
         time.sleep(minutes * 60)
+
+
+@app.command()
+def doctor(ctx: typer.Context) -> None:
+    """Проверить подключение: ключи, конфиг, токен и доступ к API hh.ru."""
+    obj: Context = ctx.obj
+    try:
+        client = obj.client
+    except Exception as exc:  # нет ключей — сетевые проверки пропускаем
+        console.print(f"[dim]клиент hh.ru не создан: {exc}[/dim]")
+        client = None
+
+    checks = run_checks(obj.config, client)
+    marks = {"ok": "[green]✓[/green]", "fail": "[red]✗[/red]", "warn": "[yellow]![/yellow]"}
+    table = Table("", "проверка", "результат", "что делать")
+    for check in checks:
+        table.add_row(marks[check.status], check.name, check.detail[:60], check.hint[:70])
+    console.print(table)
+
+    failed = [c for c in checks if c.status == "fail"]
+    if failed:
+        console.print(f"[red]Не пройдено: {len(failed)}[/red] — бот не сможет работать")
+        raise typer.Exit(1)
+    console.print("[green]Всё на месте.[/green] Дальше: hhbot search → hhbot apply")
 
 
 @app.command()
