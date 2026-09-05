@@ -138,3 +138,31 @@ def test_run_skips_negotiations_without_updates(config, storage):
     )
     agent = ChatAgent(config, client, llm, storage)
     assert agent.run() == []
+
+
+def test_plan_reply_works_without_hh_client(config, storage):
+    """Офлайн-разбор переписки: клиент hh.ru не нужен (`hhbot reply`)."""
+    config.chat.auto_confirm_interviews = True
+    llm = FakeLLM(analysis=slot_analysis("2026-09-03T15:00:00+03:00"))
+    agent = ChatAgent(config, None, llm, storage)
+
+    plan = agent.plan_reply(
+        vacancy_title="Python-разработчик",
+        employer="ACME",
+        new_messages="Приглашаем в четверг в 15:00",
+        now=NOW,
+    )
+
+    assert plan.decision.kind == "confirm"
+    assert not plan.needs_human
+    assert plan.reply
+    assert plan.decision.slot is not None
+
+
+def test_plan_reply_escalates_offline(config, storage):
+    agent = ChatAgent(config, None, FakeLLM(), storage)
+    plan = agent.plan_reply(
+        vacancy_title="Python", employer="ACME",
+        new_messages="Пришлите скан паспорта для оформления", now=NOW,
+    )
+    assert plan.needs_human and "стоп-слово" in "; ".join(plan.escalations)

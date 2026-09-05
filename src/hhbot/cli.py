@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import urllib.parse
 from importlib import resources
 from pathlib import Path
@@ -17,10 +18,11 @@ from .api import HhClient
 from .auth import AuthError, HhAuth, TokenStore
 from .config import DEFAULT_CONFIG_PATH, BotConfig
 from .doctor import run_checks
+from .letters import build_cover_letter
 from .llm import LLM
 from .matching import hard_filter, prescore
 from .models import Vacancy
-from .runner import Runner
+from .runner import Runner, render_letters_markdown
 from .scheduling import Scheduler, build_calendar, interview_to_ics
 from .storage import Storage
 
@@ -67,8 +69,12 @@ class Context:
 
     @property
     def client(self) -> HhClient:
-        auth = self.auth
-        return HhClient(token_provider=auth.access_token, user_agent=self.config.auth.user_agent)
+        """Клиент hh.ru. Без ключей приложения — анонимный: поиск и карточки вакансий."""
+        try:
+            token_provider = self.auth.access_token
+        except typer.BadParameter:
+            token_provider = None
+        return HhClient(token_provider=token_provider, user_agent=self.config.auth.user_agent)
 
     @property
     def llm(self) -> LLM:
@@ -235,7 +241,165 @@ def apply(
         console.print(f"\n[bold]Пример письма ({applied[0].title}):[/bold]\n{applied[0].letter}")
 
 
+# ---------------- офлайн: работа без API hh.ru ----------------
+
+
+def _read_text(source: Path) -> str:
+    """Читает файл или stdin (`-`)."""
+    if str(source) == "-":
+        return sys.stdin.read()
+    if not source.exists():
+        raise typer.BadParameter(f"файл не найден: {source}")
+    return source.read_text(encoding="utf-8")
+
+
+@app.command()
+def letter(
+    ctx: typer.Context,
+    file: Annotated[Path, typer.Option("--file", "-f", help="файл с текстом вакансии или '-' для stdin")],
+    title: str = typer.Option("", help="название вакансии"),
+    employer: str = typer.Option("", help="компания"),
+    url: str = typer.Option("", help="ссылка на вакансию"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="куда сохранить письмо"),
+) -> None:
+    """Оценить вакансию и написать письмо по скопированному тексту — без API hh.ru.
+
+    Скопируйте описание вакансии со страницы в файл и передайте его сюда.
+    """
+    obj: Context = ctx.obj
+    text = _read_text(file).strip()
+    if not text:
+        raise typer.BadParameter("текст вакансии пуст")
+
+    vacancy = Vacancy(
+        id="manual",
+        name=title or text.splitlines()[0][:120],
+        employer=employer,
+        url=url,
+        description=text,
+    )
+    llm = obj.llm
+    screen = llm.screen_vacancy(vacancy)
+
+    console.print(f"[bold]Оценка соответствия: {screen.fit_score}[/bold] "
+                  f"(порог {obj.config.filters.min_fit_score})")
+    if screen.matched_skills:
+        console.print(f"Совпадения: {', '.join(screen.matched_skills)}")
+    if screen.gaps:
+        console.print(f"[yellow]Пробелы: {', '.join(screen.gaps)}[/yellow]")
+    if screen.red_flags:
+        console.print(f"[red]Красные флаги: {'; '.join(screen.red_flags)}[/red]")
+
+    body, check = build_cover_letter(llm, vacancy, screen, obj.config.letter)
+    if not check.ok:
+        console.print(f"[yellow]Замечания к письму: {'; '.join(check.problems)}[/yellow]")
+
+    console.print("\n[bold]Сопроводительное письмо:[/bold]\n")
+    console.print(body)
+    if output:
+        output.write_text(body, encoding="utf-8")
+        console.print(f"\n[green]Сохранено в {output}[/green]")
+
+
+@app.command()
+def reply(
+    ctx: typer.Context,
+    file: Annotated[Path, typer.Option("--file", "-f", help="файл с перепиской или '-' для stdin")],
+    employer: str = typer.Option("", help="компания"),
+    vacancy: str = typer.Option("", "--vacancy", help="название вакансии"),
+    save: bool = typer.Option(False, help="сохранить черновик в базу (hhbot drafts)"),
+) -> None:
+    """Разобрать сообщение работодателя и подготовить ответ — без API hh.ru.
+
+    Скопируйте переписку из чата hh.ru в файл. Время собеседования сверяется
+    с вашим календарём доступности из config.yaml.
+    """
+    from .chat import ChatAgent
+
+    obj: Context = ctx.obj
+    text = _read_text(file).strip()
+    if not text:
+        raise typer.BadParameter("текст переписки пуст")
+
+    agent = ChatAgent(obj.config, None, obj.llm, obj.storage)
+    plan = agent.plan_reply(vacancy_title=vacancy, employer=employer, new_messages=text)
+
+    console.print(f"[bold]Тема:[/bold] {plan.analysis.intent} — {plan.analysis.summary}")
+    if plan.analysis.questions:
+        console.print(f"[bold]Вопросы к вам:[/bold] {'; '.join(plan.analysis.questions)}")
+    console.print(f"[bold]Решение по времени:[/bold] {plan.decision.text}")
+    if plan.needs_human:
+        console.print(f"[yellow]Требует вашего решения: {'; '.join(plan.escalations)}[/yellow]")
+
+    console.print("\n[bold]Черновик ответа:[/bold]\n")
+    console.print(plan.reply)
+
+    if plan.decision.kind == "confirm" and plan.decision.slot:
+        starts, ends = plan.decision.slot.to_iso()
+        obj.storage.add_interview(
+            negotiation_id=f"manual:{employer or vacancy or 'без названия'}",
+            starts_at=starts,
+            ends_at=ends,
+            status="proposed",
+            vacancy_title=vacancy,
+            employer=employer,
+            fmt=plan.analysis.interview_format or "online",
+            location=plan.analysis.location,
+            contact=plan.analysis.contact,
+        )
+        console.print(f"\n[green]Слот записан в календарь бота: {plan.decision.slot.human()}[/green]")
+
+    if save:
+        draft_id = obj.storage.add_draft(
+            negotiation_id=f"manual:{employer or vacancy or '—'}",
+            text=plan.reply,
+            intent=plan.analysis.intent,
+            needs_human=plan.needs_human,
+            note="; ".join(plan.escalations),
+            vacancy_title=vacancy,
+            employer=employer,
+        )
+        console.print(f"[green]Черновик #{draft_id} сохранён[/green]")
+
+
 # ---------------- переписка ----------------
+
+
+@app.command()
+def prepare(
+    ctx: typer.Context,
+    limit: int = typer.Option(10, help="сколько писем подготовить"),
+    output: Path = typer.Option(Path("letters.md"), "--output", "-o", help="куда сохранить"),
+) -> None:
+    """Подготовить письма без отправки: отклик вы делаете сами на сайте hh.ru.
+
+    Работает без токена соискателя — поиск и карточки вакансий на hh.ru доступны анонимно.
+    """
+    obj: Context = ctx.obj
+    outcomes = obj.runner().prepare_applications(limit=limit)
+
+    table = Table("статус", "оценка", "вакансия", "компания", "ссылка")
+    for outcome in outcomes:
+        if outcome.status != "prepared":
+            continue
+        table.add_row(
+            "[green]готово[/green]",
+            str(outcome.fit_score or "—"),
+            outcome.title[:38],
+            outcome.employer[:20],
+            outcome.url,
+        )
+    console.print(table)
+
+    ready = [o for o in outcomes if o.status == "prepared"]
+    if not ready:
+        console.print("[yellow]Ничего не подошло — ослабьте фильтры или min_fit_score[/yellow]")
+        return
+    output.write_text(render_letters_markdown(outcomes), encoding="utf-8")
+    console.print(
+        f"[green]{len(ready)} писем записано в {output}[/green] — "
+        "откройте ссылку, нажмите «Откликнуться» и вставьте текст"
+    )
 
 
 @app.command()

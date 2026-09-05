@@ -3,7 +3,7 @@ import pytest
 from hhbot.api import HhApiError
 from hhbot.config import SearchQuery
 from hhbot.llm import VacancyScreen
-from hhbot.runner import Runner
+from hhbot.runner import Runner, render_letters_markdown
 from tests.conftest import vacancy_payload
 from tests.fakes import FakeHhClient, FakeLLM
 
@@ -137,3 +137,53 @@ def test_no_resume_raises(config, storage):
     runner, _, _ = build(config, storage, [], client=client)
     with pytest.raises(RuntimeError):
         runner.resolve_resume_id()
+
+
+def test_prepare_mode_needs_no_applicant_api(config, storage):
+    """Режим prepare не трогает резюме и отклики — только поиск, оценка и письмо."""
+
+    class NoApplicantApiClient(FakeHhClient):
+        def my_resumes(self):
+            raise AssertionError("резюме не должны запрашиваться в режиме prepare")
+
+        def apply(self, vacancy_id, resume_id, message=None):
+            raise AssertionError("отклик не должен отправляться в режиме prepare")
+
+    client = NoApplicantApiClient(vacancies=[vacancy_payload()])
+    runner, _, _ = build(config, storage, [], client=client)
+
+    outcomes = runner.prepare_applications(limit=5)
+
+    assert [o.status for o in outcomes] == ["prepared"]
+    assert outcomes[0].letter and outcomes[0].url
+    assert storage.is_known("1001")  # повторно готовить не будем
+
+
+def test_prepare_respects_filters(config, storage):
+    config.filters.exclude_keywords = ["1С"]
+    runner, _, llm = build(config, storage, [vacancy_payload(name="Разработчик 1С")])
+
+    outcomes = runner.prepare_applications()
+
+    assert outcomes[0].status == "skipped" and llm.calls == []
+
+
+def test_prepare_ignores_daily_application_limit(config, storage):
+    """Дневной лимит hh.ru про отклики; подготовка писем под него не подпадает."""
+    config.limits.max_applications_per_day = 1
+    storage.bump("applications")
+    runner, _, _ = build(config, storage, [vacancy_payload()])
+
+    assert [o.status for o in runner.prepare_applications()] == ["prepared"]
+
+
+def test_markdown_export_contains_letter_and_link(config, storage):
+    runner, _, _ = build(config, storage, [vacancy_payload()])
+    outcomes = runner.prepare_applications()
+
+    markdown = render_letters_markdown(outcomes)
+
+    assert "https://hh.ru/vacancy/1001" in markdown
+    assert "Python-разработчик" in markdown
+    assert outcomes[0].letter.strip() in markdown
+    assert markdown.count("## ") == 1

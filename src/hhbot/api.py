@@ -1,8 +1,17 @@
 """Клиент официального API hh.ru (https://api.hh.ru).
 
-Работаем только через публичный API с OAuth-токеном пользователя — никакого парсинга
-страниц и обхода защиты. hh.ru требует заголовок HH-User-Agent с названием приложения
-и контактным email, иначе запросы отклоняются.
+Работаем только через публичный API — никакого парсинга страниц и обхода защиты.
+hh.ru требует заголовок HH-User-Agent с названием приложения и контактным email,
+иначе запросы отклоняются.
+
+Уровни доступа у эндпоинтов разные:
+* AUTH_NONE     — справочники, работают всегда;
+* AUTH_OPTIONAL — поиск и карточка вакансии: доступны анонимно, но с токеном приходит
+                  ещё и `relations` (откликались ли вы уже);
+* AUTH_REQUIRED — резюме, отклики и переписка: только с токеном соискателя.
+
+Это разделение позволяет боту работать в «полуавтоматическом» режиме без соискательского
+токена: искать, оценивать и писать письма анонимно, а отклик отправлять руками.
 """
 
 from __future__ import annotations
@@ -14,9 +23,15 @@ from typing import Any, Callable, Iterator
 
 import httpx
 
+from .auth import AuthError
+
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://api.hh.ru"
+
+AUTH_REQUIRED = "required"
+AUTH_OPTIONAL = "optional"
+AUTH_NONE = "none"
 
 
 class HhApiError(RuntimeError):
@@ -45,7 +60,7 @@ class HhApiError(RuntimeError):
 class HhClient:
     def __init__(
         self,
-        token_provider: Callable[[], str],
+        token_provider: Callable[[], str] | None,
         user_agent: str,
         base_url: str = BASE_URL,
         http: httpx.Client | None = None,
@@ -62,15 +77,39 @@ class HhClient:
 
     # ---------- низкий уровень ----------
 
-    def _headers(self, auth: bool = True) -> dict[str, str]:
+    def _headers(self, auth: str = AUTH_REQUIRED) -> dict[str, str]:
         headers = {
             "HH-User-Agent": self.user_agent,
             "User-Agent": self.user_agent,
             "Accept": "application/json",
         }
-        if auth:
-            headers["Authorization"] = f"Bearer {self._token_provider()}"
+        if auth == AUTH_NONE:
+            return headers
+
+        token = None
+        if self._token_provider is not None:
+            try:
+                token = self._token_provider()
+            except AuthError:
+                if auth == AUTH_REQUIRED:
+                    raise
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        elif auth == AUTH_REQUIRED:
+            raise AuthError(
+                "Для этого запроса нужен токен соискателя hh.ru — выполните `hhbot auth login`"
+            )
         return headers
+
+    @property
+    def authorized(self) -> bool:
+        """Есть ли рабочий токен соискателя (без обращения к сети)."""
+        if self._token_provider is None:
+            return False
+        try:
+            return bool(self._token_provider())
+        except AuthError:
+            return False
 
     def _throttle(self) -> None:
         delta = time.monotonic() - self._last_request_at
@@ -85,7 +124,7 @@ class HhClient:
         *,
         params: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
-        auth: bool = True,
+        auth: str = AUTH_REQUIRED,
     ) -> Any:
         url = path if path.startswith("http") else f"{self.base_url}{path}"
         attempt = 0
@@ -145,7 +184,7 @@ class HhClient:
         """Постраничный обход выдачи. hh.ru отдаёт максимум 2000 вакансий на запрос."""
         page = 0
         while page < max_pages:
-            payload = self.get("/vacancies", params={**params, "page": page})
+            payload = self.get("/vacancies", params={**params, "page": page}, auth=AUTH_OPTIONAL)
             items = payload.get("items", [])
             for item in items:
                 yield item
@@ -155,7 +194,7 @@ class HhClient:
                 break
 
     def get_vacancy(self, vacancy_id: str) -> dict[str, Any]:
-        return self.get(f"/vacancies/{vacancy_id}")
+        return self.get(f"/vacancies/{vacancy_id}", auth=AUTH_OPTIONAL)
 
     # ---------- отклики ----------
 
@@ -200,10 +239,12 @@ class HhClient:
     # ---------- справочники ----------
 
     def dictionaries(self) -> dict[str, Any]:
-        return self.get("/dictionaries", auth=False)
+        return self.get("/dictionaries", auth=AUTH_NONE)
 
     def areas(self) -> list[dict[str, Any]]:
-        return self.get("/areas", auth=False)
+        return self.get("/areas", auth=AUTH_NONE)
 
     def suggest_area(self, text: str) -> list[dict[str, Any]]:
-        return self.get("/suggests/areas", params={"text": text}, auth=False).get("items", [])
+        return self.get(
+            "/suggests/areas", params={"text": text}, auth=AUTH_NONE
+        ).get("items", [])

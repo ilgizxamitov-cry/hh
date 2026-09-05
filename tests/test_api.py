@@ -3,6 +3,7 @@ import pytest
 import respx
 
 from hhbot.api import HhApiError, HhClient
+from hhbot.auth import AuthError
 
 
 def make_client(**kwargs) -> HhClient:
@@ -84,3 +85,57 @@ def test_send_message_uses_message_field():
     )
     make_client().send_message("55", "Спасибо, подтверждаю")
     assert "message=" in route.calls[0].request.content.decode()
+
+
+@respx.mock
+def test_anonymous_client_can_search():
+    """Поиск вакансий доступен без токена соискателя."""
+    route = respx.get("https://api.hh.ru/vacancies").mock(
+        return_value=httpx.Response(200, json={"items": [{"id": "7"}], "pages": 1})
+    )
+    client = HhClient(token_provider=None, user_agent="hhbot-test/0.1 (t@e.com)", min_interval=0.0)
+
+    items = list(client.search_vacancies({"text": "python"}))
+
+    assert [i["id"] for i in items] == ["7"]
+    assert "Authorization" not in route.calls[0].request.headers
+    assert not client.authorized
+
+
+@respx.mock
+def test_anonymous_client_refuses_applicant_endpoints():
+    client = HhClient(token_provider=None, user_agent="hhbot-test/0.1 (t@e.com)", min_interval=0.0)
+    for call in (
+        lambda: client.apply("1", "res-1", "текст"),
+        lambda: client.my_resumes(),
+        lambda: client.send_message("55", "привет"),
+    ):
+        with pytest.raises(AuthError):
+            call()
+
+
+@respx.mock
+def test_search_uses_token_when_available():
+    """С токеном в выдаче приходит relations — видно, куда уже откликались."""
+    route = respx.get("https://api.hh.ru/vacancies").mock(
+        return_value=httpx.Response(200, json={"items": [], "pages": 1})
+    )
+    list(make_client().search_vacancies({"text": "python"}))
+    assert route.calls[0].request.headers["Authorization"] == "Bearer token-123"
+
+
+@respx.mock
+def test_expired_token_does_not_break_public_search():
+    def raise_auth() -> str:
+        raise AuthError("токен истёк")
+
+    respx.get("https://api.hh.ru/vacancies").mock(
+        return_value=httpx.Response(200, json={"items": [{"id": "7"}], "pages": 1})
+    )
+    client = HhClient(
+        token_provider=raise_auth, user_agent="hhbot-test/0.1 (t@e.com)", min_interval=0.0
+    )
+
+    assert [i["id"] for i in client.search_vacancies({"text": "python"})] == ["7"]
+    with pytest.raises(AuthError):
+        client.my_resumes()

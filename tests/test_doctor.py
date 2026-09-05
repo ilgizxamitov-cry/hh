@@ -104,8 +104,11 @@ class OfflineClient(FakeHhClient):
 
 
 def test_api_check_detects_bad_token(config):
+    """Без соискательского токена это не отказ: поиск и письма продолжают работать."""
     checks = check_api(UnauthorizedClient(), config)
-    assert status_of(checks, "авторизация") == "fail"
+    assert status_of(checks, "соискательский API") == "warn"
+    assert status_of(checks, "поиск вакансий") == "ok"
+    assert "hhbot letter" in next(c.hint for c in checks if c.name == "соискательский API")
 
 
 def test_api_check_reports_network_failure(config):
@@ -117,6 +120,7 @@ def test_api_check_happy_path(config):
     config.profile.resume_id = "res-1"
     checks = check_api(WorkingClient(), config)
     assert all(c.status == "ok" for c in checks)
+    assert status_of(checks, "соискательский API") == "ok"
     assert "res-1" in next(c.detail for c in checks if c.name == "резюме")
 
 
@@ -134,3 +138,21 @@ def test_run_checks_without_client_marks_api_skipped(config):
 def test_placeholder_email_in_user_agent_fails(config):
     config.auth.user_agent = "hhbot/0.1 (unknown@example.com)"
     assert status_of(check_credentials(config), "HH_USER_AGENT") == "fail"
+
+
+class ClosedSearchClient(FakeHhClient):
+    def dictionaries(self):
+        return {"experience": []}
+
+    def search_vacancies(self, params, max_pages=3):
+        raise HhApiError(403, {"errors": [{"value": "forbidden"}]})
+
+    def me(self):
+        raise HhApiError(403, {"errors": [{"value": "forbidden"}]})
+
+
+def test_closed_public_search_points_to_offline_mode(config):
+    """403 на /vacancies — не поломка бота, а закрытый доступ: подсказываем офлайн-команды."""
+    checks = check_api(ClosedSearchClient(), config)
+    search = next(c for c in checks if c.name == "поиск вакансий")
+    assert search.status == "warn" and "hhbot letter" in search.hint

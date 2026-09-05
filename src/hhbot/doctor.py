@@ -182,18 +182,37 @@ def check_api(client: Any, config: BotConfig) -> list[Check]:
             )
         ]
 
+    offline_hint = (
+        "поиск через API закрыт — работайте офлайн: `hhbot letter -f вакансия.txt` "
+        "и `hhbot reply -f переписка.txt`"
+    )
+    try:
+        next(iter(client.search_vacancies({"text": "python", "per_page": 1}, max_pages=1)), None)
+        checks.append(_ok("поиск вакансий", "GET /vacancies отвечает"))
+    except HhApiError as exc:
+        if exc.status in (401, 403):
+            checks.append(
+                _warn("поиск вакансий", f"hh.ru {exc.status}: доступ закрыт", offline_hint)
+            )
+        else:
+            checks.append(_fail("поиск вакансий", f"hh.ru {exc.status}: {str(exc.payload)[:80]}"))
+    except Exception as exc:
+        checks.append(_warn("поиск вакансий", str(exc)[:160], offline_hint))
+
+    auth_hint = (
+        "выполните `hhbot auth login`; если соискательский API недоступен "
+        "(закрыт hh.ru 15.12.2025) — работайте офлайн: `hhbot letter` и `hhbot reply`"
+    )
     try:
         me = client.me()
     except HhApiError as exc:
         codes = ", ".join(sorted(exc.codes)) or str(exc.payload)[:120]
-        return checks + [
-            _fail("авторизация", f"hh.ru {exc.status}: {codes}", "выполните `hhbot auth login`")
-        ]
+        return checks + [_warn("соискательский API", f"hh.ru {exc.status}: {codes}", auth_hint)]
     except Exception as exc:
-        return checks + [_fail("авторизация", str(exc)[:200], "выполните `hhbot auth login`")]
+        return checks + [_warn("соискательский API", str(exc)[:200], auth_hint)]
 
     name = f"{me.get('first_name', '')} {me.get('last_name', '')}".strip() or me.get("email", "")
-    checks.append(_ok("авторизация", f"{name} ({me.get('email', '—')})"))
+    checks.append(_ok("соискательский API", f"{name} ({me.get('email', '—')})"))
     if me.get("is_applicant") is False:
         checks.append(
             _fail("тип аккаунта", "это аккаунт работодателя", "войдите под аккаунтом соискателя")

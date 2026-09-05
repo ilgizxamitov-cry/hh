@@ -33,6 +33,20 @@ class SlotDecision:
 
 
 @dataclass
+class ReplyPlan:
+    """Результат разбора сообщения: что поняли, что решили по времени, что ответим."""
+
+    analysis: MessageAnalysis
+    decision: SlotDecision
+    reply: str
+    escalations: list[str] = field(default_factory=list)
+
+    @property
+    def needs_human(self) -> bool:
+        return bool(self.escalations)
+
+
+@dataclass
 class ChatOutcome:
     negotiation_id: str
     vacancy: str
@@ -47,7 +61,9 @@ class ChatOutcome:
 
 
 class ChatAgent:
-    def __init__(self, config: BotConfig, client: HhClient, llm: LLM, storage: Storage) -> None:
+    def __init__(
+        self, config: BotConfig, client: HhClient | None, llm: LLM, storage: Storage
+    ) -> None:
         self.config = config
         self.client = client
         self.llm = llm
@@ -139,6 +155,67 @@ class ChatAgent:
             for m in messages
         )
 
+    # ---------- планирование ответа (без обращений к hh.ru) ----------
+
+    def plan_reply(
+        self,
+        *,
+        vacancy_title: str,
+        employer: str,
+        new_messages: str,
+        history: str = "",
+        state: str = "",
+        now: datetime | None = None,
+    ) -> ReplyPlan:
+        """Разбирает сообщение, решает вопрос времени по календарю и пишет ответ.
+
+        Не ходит в hh.ru — используется и в автоматическом цикле, и вручную
+        (`hhbot reply`), когда переписка скопирована с сайта.
+        """
+        now = (now or datetime.now(self.tz)).astimezone(self.tz)
+
+        analysis = self.llm.analyze_message(
+            vacancy_title=vacancy_title,
+            employer=employer,
+            state=state,
+            history=history,
+            new_messages=new_messages,
+            now=now,
+            timezone_name=self.config.availability.timezone,
+        )
+        decision = self._decide_slot(analysis, self._scheduler(), now)
+
+        escalations: list[str] = []
+        if analysis.needs_human:
+            escalations.append(analysis.escalation_reason or "модель пометила как требующее человека")
+        if analysis.intent in ALWAYS_ESCALATE_INTENTS:
+            escalations.append(f"тема «{analysis.intent}» решается только человеком")
+        if keyword := self._keyword_escalation(new_messages):
+            escalations.append(keyword)
+        if decision.kind == "confirm" and not self.config.chat.auto_confirm_interviews:
+            escalations.append(
+                "подтверждение времени требует вашего согласия (auto_confirm_interviews=false)"
+            )
+
+        draft = self.llm.compose_reply(
+            vacancy_title=vacancy_title,
+            employer=employer,
+            new_messages=new_messages,
+            analysis=analysis,
+            slot_decision=decision.text,
+            now=now,
+            timezone_name=self.config.availability.timezone,
+            language=self.config.chat.reply_language,
+            max_chars=self.config.chat.max_reply_chars,
+            signature=self.config.profile.full_name,
+        )
+        return ReplyPlan(
+            analysis=analysis,
+            decision=decision,
+            reply=draft.text.strip()[: self.config.chat.max_reply_chars],
+            escalations=escalations,
+        )
+
     # ---------- основной сценарий ----------
 
     def handle(self, negotiation: Negotiation, now: datetime | None = None) -> ChatOutcome:
@@ -167,47 +244,20 @@ class ChatAgent:
         history = self._format_messages([m for m in messages if m.id not in new_ids][-12:])
         new_text = self._format_messages(new_from_employer)
 
-        analysis = self.llm.analyze_message(
+        plan = self.plan_reply(
             vacancy_title=negotiation.vacancy_name,
             employer=negotiation.employer,
             state=negotiation.state,
             history=history,
             new_messages=new_text,
             now=now,
-            timezone_name=self.config.availability.timezone,
         )
+        analysis = plan.analysis
+        decision = plan.decision
+        reply = plan.reply
         outcome.intent = analysis.intent
-
-        scheduler = self._scheduler()
-        decision = self._decide_slot(analysis, scheduler, now)
-
-        # --- решаем, можно ли отвечать автоматически ---
-        escalations: list[str] = []
-        if analysis.needs_human:
-            escalations.append(analysis.escalation_reason or "модель пометила как требующее человека")
-        if analysis.intent in ALWAYS_ESCALATE_INTENTS:
-            escalations.append(f"тема «{analysis.intent}» решается только человеком")
-        if keyword := self._keyword_escalation(" ".join(m.text for m in new_from_employer)):
-            escalations.append(keyword)
-        if decision.kind == "confirm" and not self.config.chat.auto_confirm_interviews:
-            escalations.append("подтверждение времени требует вашего согласия (auto_confirm_interviews=false)")
-
-        outcome.needs_human = bool(escalations)
-        outcome.reason = "; ".join(escalations)
-
-        draft = self.llm.compose_reply(
-            vacancy_title=negotiation.vacancy_name,
-            employer=negotiation.employer,
-            new_messages=new_text,
-            analysis=analysis,
-            slot_decision=decision.text,
-            now=now,
-            timezone_name=self.config.availability.timezone,
-            language=self.config.chat.reply_language,
-            max_chars=self.config.chat.max_reply_chars,
-            signature=self.config.profile.full_name,
-        )
-        reply = draft.text.strip()[: self.config.chat.max_reply_chars]
+        outcome.needs_human = plan.needs_human
+        outcome.reason = "; ".join(plan.escalations)
         outcome.reply = reply
 
         can_send = (
