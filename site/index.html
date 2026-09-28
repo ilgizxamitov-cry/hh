@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" />
+    <title>НейроНавигатор — найдите свой инструмент</title>
+    <style>
+      :root { --ink:#1d1d1f; --muted:#6e6e73; --line:rgba(0,0,0,.09); --blue:#0071e3; --paper:#fff; --wash:#f5f5f7; }
+      * { box-sizing:border-box; }
+      html { scroll-behavior:smooth; }
+      body { margin:0; background:var(--wash); color:var(--ink); font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing:-.022em; }
+      a { color:inherit; text-decoration:none; }
+      .nav { position:sticky; top:0; z-index:5; height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 max(24px, calc((100vw - 1160px)/2)); background:rgba(245,245,247,.76); backdrop-filter:blur(18px); border-bottom:1px solid rgba(0,0,0,.04); }
+      .brand { display:flex; gap:9px; align-items:center; font-size:15px; font-weight:650; letter-spacing:-.04em; }
+      .brand-mark { width:22px; height:22px; border-radius:7px; background:linear-gradient(135deg,#0071e3 0 42%,#7dc5ff 42% 54%,#1d1d1f 54%); }
+      .nav a:not(.brand) { color:#515154; font-size:13px; }
+      .wrap { max-width:1160px; margin:auto; padding:0 24px; }
+      .hero { min-height:520px; display:grid; align-content:center; justify-items:center; text-align:center; padding:70px 0 74px; }
+      .eyebrow { margin:0 0 16px; color:var(--blue); font-size:18px; font-weight:650; letter-spacing:-.025em; }
+      h1 { max-width:900px; margin:0; font-size:clamp(47px,7.5vw,90px); line-height:.98; letter-spacing:-.07em; }
+      .hero-copy { max-width:590px; margin:25px 0 30px; color:var(--muted); font-size:clamp(18px,2.1vw,23px); line-height:1.35; letter-spacing:-.035em; }
+      .hero-actions { display:flex; gap:20px; align-items:center; font-size:17px; color:var(--blue); }
+      .hero-actions a::after { content:"  ›"; font-size:23px; line-height:0; vertical-align:-2px; }
+      .finder { position:relative; margin-bottom:25px; }
+      .finder input { width:100%; border:0; border-radius:20px; padding:21px 23px 21px 55px; background:#fff; box-shadow:0 7px 27px rgba(0,0,0,.05); font:inherit; font-size:18px; outline:2px solid transparent; transition:outline .2s; }
+      .finder input:focus { outline-color:rgba(0,113,227,.36); }
+      .lens { position:absolute; left:22px; top:20px; width:16px; height:16px; border:2px solid #86868b; border-radius:50%; }
+      .lens:after { content:""; position:absolute; width:7px; border-top:2px solid #86868b; transform:rotate(45deg); right:-6px; bottom:-3px; }
+      .section-top { display:flex; align-items:end; justify-content:space-between; gap:25px; padding:46px 0 20px; }
+      h2 { margin:0; font-size:36px; letter-spacing:-.055em; }
+      .section-top p { margin:0; color:var(--muted); font-size:16px; }
+      .grid { display:grid; grid-template-columns:repeat(12, 1fr); gap:16px; padding-bottom:94px; }
+      .card { position:relative; min-height:326px; display:flex; flex-direction:column; justify-content:space-between; overflow:hidden; padding:28px; border-radius:27px; background:var(--paper); transition:transform .25s ease, box-shadow .25s ease; }
+      .card:hover { transform:translateY(-5px); box-shadow:0 16px 35px rgba(0,0,0,.09); }
+      .card:nth-child(1), .card:nth-child(2) { grid-column:span 6; }
+      .card:nth-child(n+3) { grid-column:span 4; }
+      .card.dark { color:#fff; background:#151518; }
+      .card.violet { color:#fff; background:linear-gradient(145deg,#4b2aad,#902fff); }
+      .card.coral { background:linear-gradient(145deg,#ffdcc8,#ff8a7a); }
+      .card.blue { color:#fff; background:linear-gradient(145deg,#0071e3,#43b9ff); }
+      .card-green { background:linear-gradient(145deg,#c9f2db,#6bd7ad); }
+      .category { font-size:15px; font-weight:650; }
+      .card h3 { max-width:290px; margin:6px 0 0; font-size:32px; line-height:1; letter-spacing:-.06em; }
+      .card p { max-width:310px; margin:0; color:inherit; opacity:.72; font-size:16px; line-height:1.3; letter-spacing:-.025em; }
+      .go { position:absolute; right:26px; bottom:26px; width:34px; height:34px; display:grid; place-items:center; border-radius:50%; background:rgba(255,255,255,.82); color:#1d1d1f; font-size:26px; line-height:1; }
+      .dark .go,.blue .go,.violet .go { background:rgba(255,255,255,.17); color:#fff; }
+      .art { position:absolute; pointer-events:none; }
+      .photo-art { right:-55px; bottom:-92px; width:290px; height:230px; border-radius:48% 48% 20px 20px; background:radial-gradient(circle at 55% 26%,#ffcf96 0 13%,transparent 13.4%),radial-gradient(circle at 51% 35%,#56341f 0 20%,transparent 20.5%),linear-gradient(140deg,transparent 45%,#d6b192 46% 100%); transform:rotate(-15deg); opacity:.9; }
+      .video-art { right:27px; bottom:26px; width:156px; height:105px; border:2px solid rgba(255,255,255,.45); border-radius:17px; transform:rotate(-8deg); }
+      .video-art:before { content:""; position:absolute; left:59px; top:35px; border-left:25px solid #fff; border-top:17px solid transparent; border-bottom:17px solid transparent; }
+      .type-art { right:20px; bottom:14px; color:rgba(255,255,255,.32); font:bold 155px/1 Georgia,serif; }
+      .agent-art { right:-23px; bottom:-34px; width:205px; height:205px; border:34px solid rgba(255,255,255,.22); border-radius:50%; box-shadow:0 0 0 22px rgba(255,255,255,.1); }
+      .audio-art { right:23px; bottom:28px; display:flex; align-items:center; gap:7px; height:90px; }
+      .audio-art i { width:10px; border-radius:10px; background:#0b5d54; }
+      .audio-art i:nth-child(1){height:25px}.audio-art i:nth-child(2){height:55px}.audio-art i:nth-child(3){height:85px}.audio-art i:nth-child(4){height:47px}.audio-art i:nth-child(5){height:68px}.audio-art i:nth-child(6){height:30px}
+      .footer { padding:28px 0 40px; border-top:1px solid var(--line); color:#6e6e73; font-size:12px; line-height:1.45; }
+      .footer strong { color:#1d1d1f; }
+      @media (max-width:700px) { .nav { padding:0 18px; }.nav a:not(.brand) { display:none; }.wrap { padding:0 16px; }.hero { min-height:445px; padding:60px 0; }.section-top { padding-top:27px; align-items:start; flex-direction:column; gap:6px; }.grid { gap:12px; padding-bottom:55px; }.card,.card:nth-child(1),.card:nth-child(2),.card:nth-child(n+3) { grid-column:span 12; min-height:260px; padding:24px; }.card h3 { font-size:30px; } }
+    </style>
+  </head>
+  <body>
+    <nav class="nav"><a class="brand" href="#top"><span class="brand-mark"></span>НейроНавигатор</a><a href="#catalog">Каталог инструментов</a></nav>
+    <main id="top">
+      <section class="hero wrap">
+        <p class="eyebrow">Ваш проводник в мир AI</p>
+        <h1>Создавайте больше.<br>Начните с нужного инструмента.</h1>
+        <p class="hero-copy">Простой гид по нейросетям для работы, творчества и повседневных задач. Выберите, что хотите сделать.</p>
+        <div class="hero-actions"><a href="#catalog">Смотреть категории</a><a href="#how">Как это работает</a></div>
+      </section>
+      <section class="wrap" id="catalog">
+        <div class="finder"><span class="lens"></span><input id="search" type="search" placeholder="Например: презентация, логотип или озвучка" aria-label="Поиск категории" /></div>
+        <div class="section-top"><h2>Что вы хотите создать?</h2><p id="count">6 направлений для старта</p></div>
+        <div class="grid" id="tools">
+          <a class="card" data-search="фото изображение картинка иллюстрация дизайн" href="https://www.midjourney.com/" target="_blank" rel="noopener"><div><div class="category">01 — Изображения</div><h3>Создать картинку</h3></div><p>Иллюстрации, фото, макеты и визуальные идеи из одного описания.</p><span class="photo-art art"></span><span class="go">›</span></a>
+          <a class="card dark" data-search="видео ролик анимация монтаж" href="https://runwayml.com/" target="_blank" rel="noopener"><div><div class="category">02 — Видео</div><h3>Снять без камеры</h3></div><p>Короткие ролики, анимации и эффекты — из текста или изображения.</p><span class="video-art art"></span><span class="go">›</span></a>
+          <a class="card violet" data-search="текст статья письмо перевод презентация" href="https://chatgpt.com/" target="_blank" rel="noopener"><div><div class="category">03 — Текст</div><h3>Найти слова</h3></div><p>Письма, идеи, исследования и ясные объяснения сложного.</p><span class="type-art art">A</span><span class="go">›</span></a>
+          <a class="card blue" data-search="агент помощник автоматизация код задачи" href="https://claude.ai/" target="_blank" rel="noopener"><div><div class="category">04 — AI-агенты</div><h3>Делегировать задачу</h3></div><p>Помощники, которые думают, планируют и работают вместе с вами.</p><span class="agent-art art"></span><span class="go">›</span></a>
+          <a class="card coral" data-search="дизайн логотип сайт интерфейс презентация" href="https://www.canva.com/ai-image-generator/" target="_blank" rel="noopener"><div><div class="category">05 — Дизайн</div><h3>Придумать форму</h3></div><p>Логотипы, презентации и интерфейсы без пустого холста.</p><span class="go">›</span></a>
+          <a class="card card-green" data-search="голос аудио музыка озвучка подкаст" href="https://elevenlabs.io/" target="_blank" rel="noopener"><div><div class="category">06 — Звук</div><h3>Заговорить иначе</h3></div><p>Озвучка, голоса и музыка для историй, роликов и подкастов.</p><span class="audio-art art"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="go">›</span></a>
+        </div>
+      </section>
+    </main>
+    <footer class="footer"><div class="wrap" id="how"><strong>НейроНавигатор</strong> — начните с категории, перейдите к сервису и попробуйте сделать первую задачу. Все ссылки ведут на официальные сайты инструментов.</div></footer>
+    <script>
+      const search = document.querySelector('#search');
+      const cards = [...document.querySelectorAll('.card')];
+      const count = document.querySelector('#count');
+      search.addEventListener('input', () => {
+        const query = search.value.trim().toLowerCase();
+        const shown = cards.filter(card => { const match = card.dataset.search.includes(query); card.hidden = !match; return match; }).length;
+        count.textContent = query ? `Найдено: ${shown}` : '6 направлений для старта';
+      });
+    </script>
+  </body>
+</html>
